@@ -30,6 +30,7 @@ def get_symbols_keyboard():
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+
 def generate_password(length, use_symbols):
     chars = string.ascii_letters + string.digits
     if use_symbols:
