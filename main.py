@@ -67,10 +67,10 @@ async def finish_gen(callback: types.CallbackQuery, state: FSMContext):
     # Экранируем символы для MarkdownV2, чтобы бот не выдавал ошибку
     safe_password = password.replace('\\', '\\\\').replace('`', '\\`').replace('*', '\\*').replace('_', '\\_')
     
-await callback.message.answer(
-    f"Ваш пароль ({length} симв.):\n<code>{password}</code>", 
-    parse_mode="HTML"
-)
+    await callback.message.answer(
+      f"Ваш пароль ({length} симв.):\n<code>{password}</code>", 
+      parse_mode="HTML"
+    )
 
     await state.clear()
     await callback.answer()
