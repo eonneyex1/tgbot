@@ -4,55 +4,73 @@ import asyncio
 import random
 import string
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 
 load_dotenv()
 
 TOKEN = os.getenv("TOKEN")
-
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
+# Состояния для опроса пользователя
+class PassGen(StatesGroup):
+    waiting_for_length = State()
+    waiting_for_symbols = State()
 
 def get_main_keyboard():
-    btn_generate = KeyboardButton(text="🎲 Сгенерировать пароль")
-    return ReplyKeyboardMarkup(keyboard=[[btn_generate]], resize_keyboard=True)
+    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="🎲 Сгенерировать пароль")]], resize_keyboard=True)
 
-
-def get_length_keyboard():
+def get_symbols_keyboard():
     buttons = [
-        [InlineKeyboardButton(text="8", callback_data="len_8")],
-        [InlineKeyboardButton(text="12", callback_data="len_12")],
-        [InlineKeyboardButton(text="16", callback_data="len_16")],
+        [InlineKeyboardButton(text="✅ Да", callback_data="symbols_yes")],
+        [InlineKeyboardButton(text="❌ Нет (только буквы и цифры)", callback_data="symbols_no")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-
-
-def generate_password(length):
-    chars = string.ascii_letters + string.digits + string.punctuation
+def generate_password(length, use_symbols):
+    chars = string.ascii_letters + string.digits
+    if use_symbols:
+        chars += string.punctuation
     return ''.join(random.choice(chars) for _ in range(length))
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    await message.answer("Привет! Нажми кнопку ниже.", reply_markup=get_main_keyboard())
-
+    await message.answer("Привет! Нажми кнопку ниже, чтобы создать надежный пароль.", reply_markup=get_main_keyboard())
 
 @dp.message(F.text == "🎲 Сгенерировать пароль")
-async def ask_length(message: types.Message):
-    await message.answer("Выберите длину будущего пароля:", reply_markup=get_length_keyboard())
+async def ask_length(message: types.Message, state: FSMContext):
+    await message.answer("Введите желаемую длину пароля (числом, например: 12):")
+    await state.set_state(PassGen.waiting_for_length)
 
+@dp.message(PassGen.waiting_for_length)
+async def process_length(message: types.Message, state: FSMContext):
+    if not message.text.isdigit() or int(message.text) < 4 or int(message.text) > 64:
+        await message.answer("Пожалуйста, введите целое число от 4 до 64.")
+        return
+    
+    await state.update_data(length=int(message.text))
+    await message.answer("Добавлять в пароль спецсимволы (@#$%)?", reply_markup=get_symbols_keyboard())
+    await state.set_state(PassGen.waiting_for_symbols)
 
-@dp.callback_query(F.data.startswith("len_"))
-async def process_password_gen(callback: types.CallbackQuery):
+@dp.callback_query(PassGen.waiting_for_symbols, F.data.startswith("symbols_"))
+async def finish_gen(callback: types.CallbackQuery, state: FSMContext):
+    user_data = await state.get_data()
+    length = user_data['length']
+    use_symbols = callback.data == "symbols_yes"
     
-    length = int(callback.data.split("_")[1])
+    password = generate_password(length, use_symbols)
     
-    password = generate_password(length)
+    # Экранируем символы для MarkdownV2, чтобы бот не выдавал ошибку
+    safe_password = password.replace('\\', '\\\\').replace('`', '\\`').replace('*', '\\*').replace('_', '\\_')
     
-    
-    await callback.message.answer(f"Ваш пароль на {length} символов:\n`{password}`", parse_mode="MarkdownV2")
+    await callback.message.answer(
+        f"Ваш пароль ({length} симв.):\n`{safe_password}`", 
+        parse_mode="MarkdownV2"
+    )
+    await state.clear()
     await callback.answer()
 
 async def main():
