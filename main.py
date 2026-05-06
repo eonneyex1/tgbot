@@ -4,7 +4,7 @@ import asyncio
 import random
 import string
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command, StateFilter
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
@@ -30,11 +30,17 @@ def get_symbols_keyboard():
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def get_again_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Создать другой пароль", callback_data="start_over")]
+    ])
 
 def generate_password(length, use_symbols):
     chars = string.ascii_letters + string.digits
     if use_symbols:
-        chars += string.punctuation
+        # Убираем <, > и &, чтобы HTML-разметка в Telegram не ломалась
+        punctuation = string.punctuation.replace('<', '').replace('>', '').replace('&', '')
+        chars += punctuation
     return ''.join(random.choice(chars) for _ in range(length))
 
 @dp.message(Command("start"))
@@ -43,7 +49,7 @@ async def cmd_start(message: types.Message):
 
 @dp.message(F.text == "🎲 Сгенерировать пароль")
 async def ask_length(message: types.Message, state: FSMContext):
-    await message.answer("Введите желаемую длину пароля (числом, например: 12):")
+    await message.answer("Введите желаемую длину пароля (числом от 4 до 64):")
     await state.set_state(PassGen.waiting_for_length)
 
 @dp.message(PassGen.waiting_for_length)
@@ -59,20 +65,25 @@ async def process_length(message: types.Message, state: FSMContext):
 @dp.callback_query(PassGen.waiting_for_symbols, F.data.startswith("symbols_"))
 async def finish_gen(callback: types.CallbackQuery, state: FSMContext):
     user_data = await state.get_data()
-    length = user_data['length']
+    length = user_data.get('length', 12)
     use_symbols = callback.data == "symbols_yes"
     
     password = generate_password(length, use_symbols)
     
-    # Экранируем символы для MarkdownV2, чтобы бот не выдавал ошибку
-    safe_password = password.replace('\\', '\\\\').replace('`', '\\`').replace('*', '\\*').replace('_', '\\_')
-    
     await callback.message.answer(
-      f"Ваш пароль ({length} симв.):\n<code>{password}</code>", 
-      parse_mode="HTML"
+        f"Ваш пароль ({length} симв.):\n<code>{password}</code>", 
+        parse_mode="HTML",
+        reply_markup=get_again_keyboard()
     )
-
     await state.clear()
+    await callback.answer()
+
+@dp.callback_query(F.data == "start_over")
+async def process_start_over(callback: types.CallbackQuery, state: FSMContext):
+    # Убираем кнопку из старого сообщения, чтобы не нажимали дважды
+    await callback.message.edit_reply_markup(reply_markup=None)
+    # Снова спрашиваем длину
+    await ask_length(callback.message, state)
     await callback.answer()
 
 async def main():
